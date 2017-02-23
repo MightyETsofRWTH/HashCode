@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 
 if __name__ == '__main__':
     file = os.path.join('datasets', 'small.in')
@@ -13,6 +14,9 @@ if __name__ == '__main__':
             data.append(list(line))
 
         data_np = np.array(data)
+
+    plt.imshow(data_np == 'M', cmap="Greys", interpolation='nearest')
+    plt.show()
 
     # solution...?
     print()
