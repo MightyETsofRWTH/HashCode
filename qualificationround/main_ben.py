@@ -1,15 +1,15 @@
 import os
 
 import sys
-from typing import List
+from typing import List, MutableSet
 import progressbar
 from sortedcontainers import SortedListWithKey
 
 
 #FILE = 'videos_worth_spreading.in'
 #FILE = 'trending_today.in'
-#FILE = 'kittens.in'
-FILE = 'me_at_the_zoo.in'
+FILE = 'kittens.in'
+#FILE = 'me_at_the_zoo.in'
 
 
 class Requests(object):
@@ -26,16 +26,12 @@ class Cache(object):
         self.space_used = 0
         self.cache_id = cache_id
 
-        self.possible_requests = SortedListWithKey(key=self.evaluate_request)
-        self.video_list = list()  # type: List[int]
+        self.videos = set()  # type: MutableSet[Video]
         self.endpoint_latency = [None] * num_endpoints
 
-    def evaluate_request(self, request: Requests):
-        start_latency = endpoints[request.endpoint_id].latency
-        for cache in videos[request.video_id].stored_on_caches:
-            if cache.endpoint_latency[request.endpoint_id]:
-                start_latency = min(start_latency, cache.endpoint_latency[request.endpoint_id])
-        return request.req_count * (start_latency - self.endpoint_latency[request.endpoint_id])
+    def add_video(self, video):
+        self.space_used += video.video_size
+        self.videos.add(video)
 
 
 class CacheConnection(object):
@@ -48,8 +44,11 @@ class CacheConnection(object):
 class Endpoint(object):
     def __init__(self, latency, cache_connections, endpoint_id):
         self.latency = latency
-        self.cache_connections = cache_connections  # type: List[CacheConnection]
+        self.cache_connections = SortedListWithKey(key=self.evaluate_cachecon, iterable=cache_connections)  # type: List[CacheConnection]
         self.endpoint_id = endpoint_id
+
+    def evaluate_cachecon(self, con: CacheConnection):
+        return self.latency - con.latency
 
 
 class Video(object):
@@ -58,6 +57,13 @@ class Video(object):
         self.video_size = video_size
         self.stored_on_caches = list()
 
+    def __eq__(self, other):
+        if other is None or not isinstance(other, Video):
+            return False
+        return other.video_id == self.video_id
+
+    def __hash__(self):
+        return self.video_id
 
 
 if __name__ == '__main__':
@@ -87,6 +93,8 @@ if __name__ == '__main__':
 
         print("Endpoints")
 
+        endpoints_byid = dict()
+
         # parse endpoints and connections
         bar = progressbar.ProgressBar()
         for endpoint_id in bar(range(num_endpoints)):
@@ -100,7 +108,9 @@ if __name__ == '__main__':
                 conn_list.append(CacheConnection(cache_latency, cache_id, endpoint_id))
                 caches[cache_id].endpoint_latency[endpoint_id] = cache_latency
 
-            endpoints.append(Endpoint(latency, conn_list, endpoint_id))
+            ep = Endpoint(latency, conn_list, endpoint_id)
+            endpoints.append(ep)
+            endpoints_byid[endpoint_id] = ep
 
         print("Requests")
 
@@ -114,64 +124,26 @@ if __name__ == '__main__':
 
     bar = progressbar.ProgressBar()
 
-    for request in bar(requests):
-        for connection in endpoints[request.endpoint_id].cache_connections:
-            if len(caches[connection.cache_id].possible_requests) < CACHE_POSSIBLE_REQ_THRES:
-                caches[connection.cache_id].possible_requests.add(request)
-
     # Von Sicht der Caches aus Jeden Request der gegachet werden kann sortieren (request anzahl * latency gewinn)
     # np.sort(a, axis=-1, kind='quicksort', order=None)
 
-    all_caches_full = False
-    while not all_caches_full:
-        # Danach auf den Caches den besten 'gewinn' wählen, und gegebenfalls den Request von den anderen Caches Löschen.
-        # "für alle den ersten besten" -> request aus den anderen caches austragen
+    def x(v, e):
+        for conid in bar(range(len(e.cache_connections))):
+            cache = caches[e.cache_connections[conid].cache_id]
+            if video_fits_in_cache(v, cache):
+                cache.add_video(v)
+                return
 
-        all_caches_full = True
-        bar = progressbar.ProgressBar()
-        for cache in bar(caches):
-            if len(cache.possible_requests) < 1:
-                continue
+    def video_fits_in_cache(video, cache):
+        return (cache.space_used + video.video_size) < cache.cache_size
 
-            try:
-                possible_request = cache.possible_requests.pop(-1)
-                while possible_request.used or possible_request.video_id in cache.video_list:
-                    possible_request = cache.possible_requests.pop(-1)
+    for rid in bar(range(len(requests))):
+        v = videos[requests[rid].video_id]
+        e = endpoints[requests[rid].endpoint_id]
+        x(v, e)
 
-                cache.possible_requests.add(possible_request)
-                new_possible_can = cache.possible_requests.pop(-1)
-                while new_possible_can.used or possible_request.video_id in cache.video_list:
-                    new_possible_can = cache.possible_requests.pop(-1)
-                while possible_request != new_possible_can:
-                    possible_request = new_possible_can
-                    cache.possible_requests.add(possible_request)
-                    new_possible_can = cache.possible_requests.pop(-1)
-                    while new_possible_can.used or possible_request.video_id in cache.video_list:
-                        new_possible_can = cache.possible_requests.pop(-1)
-            except IndexError:
-                continue
-
-            video_id = possible_request.video_id
-            if videos[video_id].video_size + cache.space_used > cache_size:
-                continue
-
-            cache.video_list.append(video_id)
-            videos[video_id].stored_on_caches.append(cache)
-            cache.space_used += videos[video_id].video_size
-            possible_request.used = True
-            all_caches_full = False
-
-            # remove video from other cache request lists
-
-            # Wiederhole Solange bis caches Voll
-
-
-            # Neue "Berechnung" des gewinnes auf basis des Caches.
-
-            # duplicates beachten? video gecached auf zwei caches mit requests vom gleichen endpoint
 
     print("#############")
-    print()
 
     if sys.platform.startswith('linux'):
         user = os.environ['USERNAME']
@@ -183,5 +155,5 @@ if __name__ == '__main__':
     with open('output_{}_{}.txt'.format(user, FILE), 'w') as output_file:
         output_file.write(str(len(caches)) + '\n')
         for cache in caches:
-            output_file.write("{} {}\n".format(cache.cache_id, ' '.join(map(str, cache.video_list))))
+            output_file.write("{} {}\n".format(cache.cache_id, ' '.join(map(lambda _v: str(_v.video_id), cache.videos))))
     print()

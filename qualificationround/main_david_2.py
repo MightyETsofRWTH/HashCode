@@ -1,15 +1,13 @@
 import os
-
-import sys
 from typing import List
 import progressbar
 from sortedcontainers import SortedListWithKey
 
 
 #FILE = 'videos_worth_spreading.in'
-#FILE = 'trending_today.in'
+FILE = 'trending_today.in'
 #FILE = 'kittens.in'
-FILE = 'me_at_the_zoo.in'
+#FILE = 'me_at_the_zoo.in'
 
 
 class Requests(object):
@@ -35,7 +33,8 @@ class Cache(object):
         for cache in videos[request.video_id].stored_on_caches:
             if cache.endpoint_latency[request.endpoint_id]:
                 start_latency = min(start_latency, cache.endpoint_latency[request.endpoint_id])
-        return request.req_count * (start_latency - self.endpoint_latency[request.endpoint_id])
+        #return request.req_count * (start_latency - self.endpoint_latency[request.endpoint_id])
+        return request.req_count/max_request_size + (start_latency - self.endpoint_latency[request.endpoint_id])/endpoints[request.endpoint_id].latency
 
 
 class CacheConnection(object):
@@ -57,7 +56,6 @@ class Video(object):
         self.video_id = video_id
         self.video_size = video_size
         self.stored_on_caches = list()
-
 
 
 if __name__ == '__main__':
@@ -104,10 +102,12 @@ if __name__ == '__main__':
 
         print("Requests")
 
+        max_request_size = 0
         bar = progressbar.ProgressBar()
         for i in bar(range(req_count)):
             video_id, endpoint_id, request_count = list(map(int, str(next(_input).strip()).split(' ')))
             requests.add(Requests(video_id, endpoint_id, request_count))
+            max_request_size = max(max_request_size, request_count)
 
     # Solution
     CACHE_POSSIBLE_REQ_THRES = 50000
@@ -123,13 +123,19 @@ if __name__ == '__main__':
     # np.sort(a, axis=-1, kind='quicksort', order=None)
 
     all_caches_full = False
+
     while not all_caches_full:
+        #print(".")
         # Danach auf den Caches den besten 'gewinn' wählen, und gegebenfalls den Request von den anderen Caches Löschen.
         # "für alle den ersten besten" -> request aus den anderen caches austragen
 
         all_caches_full = True
         bar = progressbar.ProgressBar()
-        for cache in bar(caches):
+        best_possible_cache = None
+        best_possible_request = None
+        best_evaluate = 0
+        for cache in caches:
+            #print(len(cache.possible_requests))
             if len(cache.possible_requests) < 1:
                 continue
 
@@ -140,47 +146,62 @@ if __name__ == '__main__':
 
                 cache.possible_requests.add(possible_request)
                 new_possible_can = cache.possible_requests.pop(-1)
-                while new_possible_can.used or possible_request.video_id in cache.video_list:
+                while new_possible_can.used or new_possible_can.video_id in cache.video_list:
                     new_possible_can = cache.possible_requests.pop(-1)
                 while possible_request != new_possible_can:
                     possible_request = new_possible_can
                     cache.possible_requests.add(possible_request)
                     new_possible_can = cache.possible_requests.pop(-1)
-                    while new_possible_can.used or possible_request.video_id in cache.video_list:
+                    while new_possible_can.used or new_possible_can.video_id in cache.video_list:
                         new_possible_can = cache.possible_requests.pop(-1)
             except IndexError:
                 continue
+            #
+            # video_id = possible_request.video_id
+            # if videos[video_id].video_size + cache.space_used > cache_size:
+            #     continue
+            #
+            # cache.video_list.append(video_id)
+            # videos[video_id].stored_on_caches.append(cache)
+            # cache.space_used += videos[video_id].video_size
+            # possible_request.used = True
+            # all_caches_full = False
 
             video_id = possible_request.video_id
             if videos[video_id].video_size + cache.space_used > cache_size:
                 continue
 
-            cache.video_list.append(video_id)
-            videos[video_id].stored_on_caches.append(cache)
-            cache.space_used += videos[video_id].video_size
-            possible_request.used = True
+            all_caches_full = False
+            cache.possible_requests.add(possible_request)
+
+            evaluate = cache.evaluate_request(possible_request)
+            if not best_possible_request:
+                best_possible_request = possible_request
+                best_evaluate = evaluate
+                best_possible_cache = cache
+            elif best_evaluate < evaluate:
+                best_possible_request = possible_request
+                best_evaluate = evaluate
+                best_possible_cache = cache
+
+        if best_possible_request:
+            best_possible_cache.possible_requests.remove(best_possible_request)
+            video_id = best_possible_request.video_id
+
+            best_possible_cache.video_list.append(video_id)
+            videos[video_id].stored_on_caches.append(best_possible_cache)
+            best_possible_cache.space_used += videos[video_id].video_size
+            best_possible_request.used = True
             all_caches_full = False
 
-            # remove video from other cache request lists
-
-            # Wiederhole Solange bis caches Voll
-
-
-            # Neue "Berechnung" des gewinnes auf basis des Caches.
-
-            # duplicates beachten? video gecached auf zwei caches mit requests vom gleichen endpoint
 
     print("#############")
-    print()
 
-    if sys.platform.startswith('linux'):
-        user = os.environ['USERNAME']
-    elif sys.platform.startswith('win'):
-        user = os.getlogin()
-    else:
-        user = "unknown"
+    print("Done")
 
-    with open('output_{}_{}.txt'.format(user, FILE), 'w') as output_file:
+    print("#############")
+
+    with open('output_{}_{}.txt'.format(os.getlogin(), FILE), 'w') as output_file:
         output_file.write(str(len(caches)) + '\n')
         for cache in caches:
             output_file.write("{} {}\n".format(cache.cache_id, ' '.join(map(str, cache.video_list))))

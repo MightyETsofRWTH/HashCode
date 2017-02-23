@@ -1,15 +1,13 @@
 import os
-
-import sys
 from typing import List
-import progressbar
+
 from sortedcontainers import SortedListWithKey
 
 
 #FILE = 'videos_worth_spreading.in'
 #FILE = 'trending_today.in'
-#FILE = 'kittens.in'
-FILE = 'me_at_the_zoo.in'
+FILE = 'kittens.in'
+#FILE = 'me_at_the_zoo.in'
 
 
 class Requests(object):
@@ -28,13 +26,12 @@ class Cache(object):
 
         self.possible_requests = SortedListWithKey(key=self.evaluate_request)
         self.video_list = list()  # type: List[int]
-        self.endpoint_latency = [None] * num_endpoints
+        self.endpoint_latency = [0] * num_endpoints
 
     def evaluate_request(self, request: Requests):
         start_latency = endpoints[request.endpoint_id].latency
         for cache in videos[request.video_id].stored_on_caches:
-            if cache.endpoint_latency[request.endpoint_id]:
-                start_latency = min(start_latency, cache.endpoint_latency[request.endpoint_id])
+            start_latency = min(start_latency, cache.endpoint_latency[request.endpoint_id])
         return request.req_count * (start_latency - self.endpoint_latency[request.endpoint_id])
 
 
@@ -68,28 +65,19 @@ if __name__ == '__main__':
 
     # Read files
 
-    print("Start")
-
     with open(os.path.join('datasets', FILE), 'r') as _input:
         num_videos, num_endpoints, req_count, cache_count, cache_size = (int(str(x)) for x in
                                                                          next(_input).strip().split(' '))
 
-        print("Reading")
-
         for cache_id in range(cache_count):
             caches.append(Cache(cache_size, cache_id))
-
-        print("Generated")
 
         video_size_list = list(map(int, str(next(_input).strip()).split(' ')))
         min_video_size, max_video_size = min(video_size_list), max(video_size_list)
         videos = [Video(_id, size) for _id, size in enumerate(video_size_list)]
 
-        print("Endpoints")
-
         # parse endpoints and connections
-        bar = progressbar.ProgressBar()
-        for endpoint_id in bar(range(num_endpoints)):
+        for endpoint_id in range(num_endpoints):
             new_caches = list()
             latency, num_caches = list(map(int, str(next(_input).strip()).split(' ')))
 
@@ -102,22 +90,17 @@ if __name__ == '__main__':
 
             endpoints.append(Endpoint(latency, conn_list, endpoint_id))
 
-        print("Requests")
-
-        bar = progressbar.ProgressBar()
-        for i in bar(range(req_count)):
+        for i in range(req_count):
             video_id, endpoint_id, request_count = list(map(int, str(next(_input).strip()).split(' ')))
             requests.add(Requests(video_id, endpoint_id, request_count))
 
     # Solution
-    CACHE_POSSIBLE_REQ_THRES = 50000
+    CACHE_POSSIBLE_REQ_THRES = 5
 
-    bar = progressbar.ProgressBar()
-
-    for request in bar(requests):
+    for request in requests:
         for connection in endpoints[request.endpoint_id].cache_connections:
-            if len(caches[connection.cache_id].possible_requests) < CACHE_POSSIBLE_REQ_THRES:
-                caches[connection.cache_id].possible_requests.add(request)
+            #if len(caches[connection.cache_id].possible_requests) < CACHE_POSSIBLE_REQ_THRES:
+            caches[connection.cache_id].possible_requests.add(request)
 
     # Von Sicht der Caches aus Jeden Request der gegachet werden kann sortieren (request anzahl * latency gewinn)
     # np.sort(a, axis=-1, kind='quicksort', order=None)
@@ -128,8 +111,7 @@ if __name__ == '__main__':
         # "für alle den ersten besten" -> request aus den anderen caches austragen
 
         all_caches_full = True
-        bar = progressbar.ProgressBar()
-        for cache in bar(caches):
+        for cache in caches:
             if len(cache.possible_requests) < 1:
                 continue
 
@@ -173,14 +155,7 @@ if __name__ == '__main__':
     print("#############")
     print()
 
-    if sys.platform.startswith('linux'):
-        user = os.environ['USERNAME']
-    elif sys.platform.startswith('win'):
-        user = os.getlogin()
-    else:
-        user = "unknown"
-
-    with open('output_{}_{}.txt'.format(user, FILE), 'w') as output_file:
+    with open('output_{}.txt'.format(FILE), 'w') as output_file:
         output_file.write(str(len(caches)) + '\n')
         for cache in caches:
             output_file.write("{} {}\n".format(cache.cache_id, ' '.join(map(str, cache.video_list))))
